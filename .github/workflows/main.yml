@@ -23,21 +23,31 @@ jobs:
       - name: Checkout source
         uses: actions/checkout@v4
 
+      - name: Unzip uploaded project (if a zip was uploaded)
+        shell: bash
+        run: |
+          ZIP=$(find . -maxdepth 2 -iname "SPlayer*.zip" -not -path "./extracted/*" | head -n 1)
+          if [[ -n "$ZIP" ]]; then
+            echo "Found zip: $ZIP"
+            rm -rf extracted
+            mkdir -p extracted
+            unzip -q -o "$ZIP" -d extracted
+          else
+            echo "No zip found - using the files in the repository directly"
+          fi
+
       - name: Detect Android project directory
         id: project
         shell: bash
         run: |
-          if [[ -f "SPlayer/settings.gradle" && -f "SPlayer/app/build.gradle" ]]; then
-            PROJECT_DIR="SPlayer"
-          elif [[ -f "settings.gradle" && -f "app/build.gradle" ]]; then
-            PROJECT_DIR="."
-          else
-            echo "Could not find settings.gradle and app/build.gradle in the repository root or SPlayer/ directory."
-            echo "Upload the contents of the SPlayer project folder, including app/, build.gradle and settings.gradle."
+          SETTINGS=$(find . -maxdepth 4 -name settings.gradle -not -path "*/build/*" | while read -r s; do d=$(dirname "$s"); if [[ -f "$d/app/build.gradle" ]]; then echo "$d"; fi; done | sort | tail -n 1)
+          if [[ -z "$SETTINGS" ]]; then
+            echo "Could not find settings.gradle together with app/build.gradle."
+            echo "Upload SPlayer.zip (or the unzipped project files) to the repository."
             exit 1
           fi
-          echo "PROJECT_DIR=${PROJECT_DIR}" >> "$GITHUB_ENV"
-          echo "Project directory: ${PROJECT_DIR}"
+          echo "PROJECT_DIR=${SETTINGS}" >> "$GITHUB_ENV"
+          echo "Project directory: ${SETTINGS}"
 
       - name: Set up Java 17
         uses: actions/setup-java@v4
