@@ -1,0 +1,103 @@
+name: Build S Player APK
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: splayer-android-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build Android APK
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Unzip Sajid_Player.zip (if it is in the repo) and find the project
+        id: project
+        shell: bash
+        run: |
+          if [[ -f "Sajid_Player.zip" ]]; then
+            rm -rf _src && mkdir _src
+            unzip -q -o Sajid_Player.zip -d _src
+            SETTINGS=$(find _src -maxdepth 3 -name settings.gradle | head -n 1)
+            if [[ -z "$SETTINGS" ]]; then
+              echo "Sajid_Player.zip does not contain settings.gradle"
+              exit 1
+            fi
+            PROJECT_DIR=$(dirname "$SETTINGS")
+          elif [[ -f "SPlayer/settings.gradle" && -f "SPlayer/app/build.gradle" ]]; then
+            PROJECT_DIR="SPlayer"
+          elif [[ -f "settings.gradle" && -f "app/build.gradle" ]]; then
+            PROJECT_DIR="."
+          else
+            echo "Upload Sajid_Player.zip to the repository root (or the project files)."
+            exit 1
+          fi
+          echo "PROJECT_DIR=${PROJECT_DIR}" >> "$GITHUB_ENV"
+          echo "Project directory: ${PROJECT_DIR}"
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Accept Android SDK licenses
+        shell: bash
+        run: yes | sdkmanager --licenses >/dev/null || true
+
+      - name: Install Android SDK packages
+        run: sdkmanager --install "platform-tools" "platforms;android-34" "build-tools;34.0.0"
+
+      - name: Set up Gradle 8.7
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.7'
+
+      - name: Check Gradle and project configuration
+        run: |
+          gradle --version
+          gradle -p "$PROJECT_DIR" tasks --no-daemon --stacktrace
+
+      - name: Build release APK (small, R8 shrunk)
+        run: gradle -p "$PROJECT_DIR" clean assembleRelease --no-daemon --stacktrace
+
+      - name: Verify APK exists
+        shell: bash
+        run: |
+          APK_PATH="$PROJECT_DIR/app/build/outputs/apk/release/app-release.apk"
+          if [[ ! -s "$APK_PATH" ]]; then
+            echo "APK was not created: $APK_PATH"
+            exit 1
+          fi
+          ls -lh "$APK_PATH"
+
+      - name: Rename APK to Sajid_Player.apk
+        shell: bash
+        run: |
+          mkdir -p dist
+          cp "$PROJECT_DIR/app/build/outputs/apk/release/app-release.apk" dist/Sajid_Player.apk
+          ls -lh dist/Sajid_Player.apk
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: Sajid_Player_APK
+          path: dist/Sajid_Player.apk
+          if-no-files-found: error
+          retention-days: 14
